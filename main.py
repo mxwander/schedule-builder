@@ -65,17 +65,49 @@ def build_schedules(courses):
         for name, section in zip(course_names, combo):
             chosen.extend(courses[name][section])
         if not find_conflicts(chosen):
-            valid.append(dict(zip(course_names, combo)))
+            valid.append({"sections": dict(zip(course_names, combo)), "meetings": chosen})
     return valid
 
+
+def to_clock(minutes):
+    """Turn minutes after midnight (835) back into a time like '1:55 PM'."""
+    hours, mins = divmod(minutes, 60)
+    suffix = "AM" if hours < 12 else "PM"
+    hours = hours % 12 or 12
+    return f"{hours}:{mins:02d} {suffix}"
+
+
+def schedule_stats(meetings):
+    """Measure a schedule: days on campus, total gap minutes, earliest class."""
+    days_used = set()
+    for m in meetings:
+        days_used |= m["days"]
+
+    earliest = min(m["start"] for m in meetings)
+
+    gap_minutes = 0
+    for day in days_used:
+        todays = sorted((m for m in meetings if day in m["days"]), key=lambda m: m["start"])
+        for prev, nxt in zip(todays, todays[1:]):
+            gap_minutes += nxt["start"] - prev["end"]
+
+    return {"days": len(days_used), "earliest": earliest, "gaps": gap_minutes}
 
 print("Schedule builder starting")
 meetings = load_meetings("courses.csv")
 courses = group_sections(meetings)
 schedules = build_schedules(courses)
 
-print(f"Found {len(schedules)} possible schedule(s).")
-for number, schedule in enumerate(schedules, start=1):
-    print(f"\nSchedule {number}:")
-    for course, section in schedule.items():
+for s in schedules:
+    s["stats"] = schedule_stats(s["meetings"])
+
+# Best first: fewest days, then least gap time, then latest first class
+schedules.sort(key=lambda s: (s["stats"]["days"], s["stats"]["gaps"], -s["stats"]["earliest"]))
+
+print(f"Found {len(schedules)} possible schedule(s), best first.")
+for number, s in enumerate(schedules, start=1):
+    stats = s["stats"]
+    print(f"\nSchedule {number}: {stats['days']} days on campus, "
+          f"{stats['gaps']} min of gaps, earliest class {to_clock(stats['earliest'])}")
+    for course, section in s["sections"].items():
         print(f"  {course} section {section}")
